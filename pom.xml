@@ -20,6 +20,7 @@
         <java.version>25</java.version>
         <springdoc.version>3.1.1</springdoc.version>
         <commonmark.version>0.30.0</commonmark.version>
+        <lucene.version>10.5.1</lucene.version>
     </properties>
 
 
@@ -76,6 +77,16 @@
             <groupId>org.commonmark</groupId>
             <artifactId>commonmark-ext-task-list-items</artifactId>
             <version>${commonmark.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-core</artifactId>
+            <version>${lucene.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-analysis-common</artifactId>
+            <version>${lucene.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>
