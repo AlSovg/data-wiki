@@ -203,6 +203,20 @@ public class DocumentService {
                 .optional();
     }
 
+    /** Metadata of the owner's live documents among {@code ids}; missing ones (e.g. just deleted) are absent. */
+    @Transactional(readOnly = true)
+    public Map<UUID, DocumentMeta> metas(UUID ownerId, List<UUID> ids) {
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<UUID, DocumentMeta> result = new java.util.HashMap<>();
+        jdbc.sql("select * from documents where owner_id = :owner and deleted_at is null and id in (:ids)")
+                .param("owner", ownerId).param("ids", ids)
+                .query((rs, n) -> meta(rs.getObject("id", UUID.class), rs, n))
+                .list().forEach(m -> result.put(m.id(), m));
+        return result;
+    }
+
     /** Newest first. Filters and sort options arrive with the API stage. */
     @Transactional(readOnly = true)
     public Page list(UUID ownerId, int page, int size) {
