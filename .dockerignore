@@ -3,3 +3,5 @@ target/
 docs/
 lucene-index/
 .env
+frontend/node_modules/
+frontend/dist/

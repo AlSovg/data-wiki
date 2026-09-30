@@ -4,13 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Состояние проекта
 
-Есть каркас Spring Boot (этап 1 `PLAN.md`); домен, парсер, индекс и поиск — по этапам плана. ТЗ — `AGENTS.md`, план — `PLAN.md`.
+Реализованы бэкенд (домен, парсер, индекс, поиск, кэш, JWT, REST) и Vue-клиент; осталось тестирование, замеры и материалы для защиты — см. `PLAN.md`. ТЗ — `AGENTS.md`, план — `PLAN.md`.
 
 ## Команды
 
 - `mvn verify` — сборка и все тесты (нужен запущенный Docker: Testcontainers, первый прогон долгий из-за загрузки образов)
 - `mvn test -Dtest=ИмяТеста` — один тест
 - `cp .env.example .env && docker compose up -d --build` — весь стек; health: `GET /actuator/health` (через nginx, порт `HTTP_PORT`)
+- Фронтенд (`frontend/`): `npm install`, `npm run dev` (прокси `/api` на :8080), `npm run build` (vue-tsc + vite)
 - Линтера нет. Новые команды добавляй сюда только когда они появились в репозитории.
 
 ## Что строим
