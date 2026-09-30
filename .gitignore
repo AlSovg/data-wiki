@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+node_modules/
+.nuxt/
+.output/
+.pytest_cache/
+target/
+.idea/
+*.iml
+.vscode/
+lucene-index/

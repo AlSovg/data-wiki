@@ -1,0 +1,539 @@
+openapi: 3.1.0
+info:
+  title: Data Wiki API
+  version: 0.1.0
+  description: |
+    Сервис личной базы знаний. Черновик контракта: доступ только владельца (`owner_id` из JWT),
+    шаринг не входит до ответа автора кейса. Финальный OpenAPI генерируется springdoc из кода;
+    этот файл — источник для сверки.
+    Ошибки — RFC 9457 (`application/problem+json`).
+servers:
+  - url: http://localhost:8080
+tags:
+  - name: auth
+  - name: import
+  - name: documents
+  - name: search
+  - name: stats
+  - name: settings
+  - name: admin
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [auth]
+      summary: Регистрация
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '201':
+          description: Пользователь создан, токен выдан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthToken' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '400': { $ref: '#/components/responses/Problem' }
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Вход
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: Токен выдан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthToken' }
+        '401': { $ref: '#/components/responses/Problem' }
+
+  /api/import:
+    post:
+      tags: [import]
+      summary: Импорт документов
+      description: |
+        Режимы: один файл, несколько файлов, папка (клиент передаёт файлы с относительным путём
+        в имени части), архив `.zip`. Принимаются только `.md` (UTF-8, до 1 МБ на файл);
+        остальное пропускается с предупреждением. Ответ — отчёт по каждому файлу.
+        Дубликат определяется по хэшу нормализованного содержимого; политика при дубликате
+        (пропуск / новая версия) — вопрос 10 автору кейса, пока пропуск.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        '200':
+          description: Отчёт по файлам
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportReport' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '415': { $ref: '#/components/responses/Problem' }
+
+  /api/documents:
+    get:
+      tags: [documents]
+      summary: Список документов текущего пользователя
+      parameters:
+        - { $ref: '#/components/parameters/Tags' }
+        - { $ref: '#/components/parameters/Category' }
+        - { $ref: '#/components/parameters/Author' }
+        - { $ref: '#/components/parameters/UpdatedFrom' }
+        - { $ref: '#/components/parameters/UpdatedTo' }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [updated_at, created_at, title, size_bytes]
+            default: updated_at
+        - name: order
+          in: query
+          schema: { type: string, enum: [asc, desc], default: desc }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+      responses:
+        '200':
+          description: Страница документов
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DocumentPage' }
+
+  /api/documents/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/DocumentId' }
+    get:
+      tags: [documents]
+      summary: Документ (актуальная версия)
+      responses:
+        '200':
+          description: Документ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '404': { $ref: '#/components/responses/Problem' }
+    put:
+      tags: [documents]
+      summary: Правка — создаёт новую версию
+      description: |
+        Тело — полный Markdown-текст (с frontmatter). Метаданные пересчитываются из frontmatter.
+        Если нормализованное содержимое не изменилось (тот же хэш), новая версия не создаётся, ответ 200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentUpdate' }
+      responses:
+        '200':
+          description: Документ (новая или прежняя версия)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Document' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [documents]
+      summary: Удаление
+      description: Мягкое удаление (`deleted_at`), документ исчезает из индекса. Корзина и восстановление — вопрос 11.
+      responses:
+        '204': { description: Удалено }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/documents/{id}/versions:
+    parameters:
+      - { $ref: '#/components/parameters/DocumentId' }
+    get:
+      tags: [documents]
+      summary: Список версий
+      responses:
+        '200':
+          description: Версии от новой к старой
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/VersionSummary' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/documents/{id}/versions/{version}:
+    parameters:
+      - { $ref: '#/components/parameters/DocumentId' }
+      - name: version
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    get:
+      tags: [documents]
+      summary: Конкретная версия с текстом
+      responses:
+        '200':
+          description: Версия
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Version' }
+        '404': { $ref: '#/components/responses/Problem' }
+
+  /api/search:
+    get:
+      tags: [search]
+      summary: Полнотекстовый поиск
+      description: |
+        Всегда ограничен документами текущего пользователя. Метод и веса — из параметров,
+        иначе из `/api/settings/search`. Результаты кэшируются (ключ содержит user id и поколение индекса).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 500 }
+        - name: method
+          in: query
+          description: Имя метода из `/api/search/methods`
+          schema: { type: string, default: bm25 }
+        - name: weights
+          in: query
+          description: Только для `method=hybrid`. Формат `bm25:0.7,tfidf:0.3`; нормируются к сумме 1.
+          schema: { type: string, example: 'bm25:0.7,tfidf:0.3' }
+        - { $ref: '#/components/parameters/Tags' }
+        - { $ref: '#/components/parameters/Category' }
+        - { $ref: '#/components/parameters/Author' }
+        - { $ref: '#/components/parameters/UpdatedFrom' }
+        - { $ref: '#/components/parameters/UpdatedTo' }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [relevance, updated_at, size_bytes]
+            default: relevance
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/Size' }
+      responses:
+        '200':
+          description: Результаты
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+
+  /api/search/methods:
+    get:
+      tags: [search]
+      summary: Зарегистрированные методы скоринга
+      responses:
+        '200':
+          description: Имена методов
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+                example: [bm25, tfidf, hybrid]
+
+  /api/stats:
+    get:
+      tags: [stats]
+      summary: Статистика базы текущего пользователя
+      responses:
+        '200':
+          description: Агрегаты
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Stats' }
+
+  /api/settings/search:
+    get:
+      tags: [settings]
+      summary: Метод и веса по умолчанию
+      responses:
+        '200':
+          description: Настройки
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchSettings' }
+    put:
+      tags: [settings]
+      summary: Изменить настройки поиска
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SearchSettings' }
+      responses:
+        '200':
+          description: Сохранено
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchSettings' }
+        '400': { $ref: '#/components/responses/Problem' }
+
+  /api/admin/reindex:
+    post:
+      tags: [admin]
+      summary: Пересборка индекса из PostgreSQL
+      description: Роль администратора (нужна ли — вопрос 6). Запускается асинхронно.
+      responses:
+        '202': { description: Пересборка запущена }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    DocumentId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Tags:
+      name: tags
+      in: query
+      description: Документ должен иметь все перечисленные теги (AND)
+      schema: { type: array, items: { type: string } }
+      style: form
+      explode: false
+    Category:
+      name: category
+      in: query
+      schema: { type: string }
+    Author:
+      name: author
+      in: query
+      schema: { type: string }
+    UpdatedFrom:
+      name: updated_from
+      in: query
+      schema: { type: string, format: date-time }
+    UpdatedTo:
+      name: updated_to
+      in: query
+      schema: { type: string, format: date-time }
+    Page:
+      name: page
+      in: query
+      description: Номер страницы с 0
+      schema: { type: integer, minimum: 0, default: 0 }
+    Size:
+      name: size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+
+  responses:
+    Problem:
+      description: Ошибка
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      required: [status, title]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, maxLength: 128 }
+
+    AuthToken:
+      type: object
+      required: [accessToken, expiresIn]
+      properties:
+        accessToken: { type: string }
+        tokenType: { type: string, default: Bearer }
+        expiresIn: { type: integer, description: Секунды }
+
+    DocumentMeta:
+      type: object
+      required: [id, title, version, tags, sizeBytes, wordCount, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        tags: { type: array, items: { type: string } }
+        category: { type: [string, 'null'] }
+        author: { type: string }
+        version: { type: integer }
+        sizeBytes: { type: integer }
+        wordCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Document:
+      allOf:
+        - $ref: '#/components/schemas/DocumentMeta'
+        - type: object
+          required: [content]
+          properties:
+            content: { type: string, description: Нормализованный Markdown }
+            extra:
+              type: object
+              additionalProperties: true
+              description: Прочие поля frontmatter
+            structure:
+              type: array
+              description: Дерево заголовков
+              items: { $ref: '#/components/schemas/Heading' }
+
+    Heading:
+      type: object
+      required: [level, text]
+      properties:
+        level: { type: integer, minimum: 1, maximum: 6 }
+        text: { type: string }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/Heading' }
+
+    DocumentUpdate:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, description: Полный Markdown с frontmatter }
+
+    DocumentPage:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/DocumentMeta' }
+
+    Page:
+      type: object
+      required: [page, size, total]
+      properties:
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer, format: int64 }
+
+    VersionSummary:
+      type: object
+      required: [version, createdAt]
+      properties:
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string, format: uuid }
+
+    Version:
+      allOf:
+        - $ref: '#/components/schemas/VersionSummary'
+        - type: object
+          required: [content]
+          properties:
+            content: { type: string }
+            extra: { type: object, additionalProperties: true }
+
+    ImportReport:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            required: [path, status]
+            properties:
+              path: { type: string, description: Исходный путь внутри папки или архива }
+              status: { type: string, enum: [created, duplicate, rejected, skipped] }
+              documentId: { type: string, format: uuid }
+              reason: { type: string, description: Причина для rejected и skipped }
+              warnings:
+                type: array
+                items: { type: string }
+                description: Например, невалидный frontmatter
+        created: { type: integer }
+        duplicates: { type: integer }
+        rejected: { type: integer }
+
+    SearchResult:
+      allOf:
+        - $ref: '#/components/schemas/Page'
+        - type: object
+          required: [method, hits]
+          properties:
+            method: { type: string, description: Применённый метод }
+            cached: { type: boolean }
+            tookMs: { type: integer }
+            hits:
+              type: array
+              items: { $ref: '#/components/schemas/Hit' }
+
+    Hit:
+      type: object
+      required: [document, score]
+      properties:
+        document: { $ref: '#/components/schemas/DocumentMeta' }
+        score:
+          type: number
+          description: Оценка метода; для гибрида — сумма нормализованных оценок (0..1)
+        highlights:
+          type: array
+          description: Фрагменты с `<mark>`; клиент обязан санитизировать HTML
+          items:
+            type: object
+            properties:
+              field: { type: string, enum: [title, headings, body, code] }
+              snippet: { type: string }
+
+    Stats:
+      type: object
+      properties:
+        documents: { type: integer }
+        totalSizeBytes: { type: integer, format: int64 }
+        totalWords: { type: integer, format: int64 }
+        byTag:
+          type: array
+          items: { $ref: '#/components/schemas/Bucket' }
+        byCategory:
+          type: array
+          items: { $ref: '#/components/schemas/Bucket' }
+        byAuthor:
+          type: array
+          items: { $ref: '#/components/schemas/Bucket' }
+
+    Bucket:
+      type: object
+      required: [key, count]
+      properties:
+        key: { type: string }
+        count: { type: integer }
+
+    SearchSettings:
+      type: object
+      required: [method]
+      properties:
+        method: { type: string, default: bm25 }
+        weights:
+          type: object
+          additionalProperties: { type: number, minimum: 0 }
+          example: { bm25: 0.7, tfidf: 0.3 }
