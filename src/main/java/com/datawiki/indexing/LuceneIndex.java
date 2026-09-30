@@ -1,5 +1,6 @@
 package com.datawiki.indexing;
 
+import com.datawiki.cache.SearchCache;
 import com.datawiki.documents.DocumentService.DocumentMeta;
 import com.datawiki.markdown.ParsedDocument;
 import java.io.IOException;
@@ -19,6 +20,7 @@ import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.IOFunction;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -50,10 +52,24 @@ public class LuceneIndex implements AutoCloseable {
     private final IndexWriter writer;
     private final SearcherManager searchers;
 
-    public LuceneIndex(@Value("${app.lucene.index-dir}") Path dir, WikiAnalyzer analyzer) throws IOException {
+    private final Runnable onCommit;
+
+    @Autowired
+    public LuceneIndex(@Value("${app.lucene.index-dir}") Path dir, WikiAnalyzer analyzer, SearchCache cache)
+            throws IOException {
+        this(dir, analyzer, cache::bumpGeneration);
+    }
+
+    /** Without cache invalidation; for tests of the index alone. */
+    public LuceneIndex(Path dir, WikiAnalyzer analyzer) throws IOException {
+        this(dir, analyzer, () -> { });
+    }
+
+    private LuceneIndex(Path dir, WikiAnalyzer analyzer, Runnable onCommit) throws IOException {
         this.directory = FSDirectory.open(dir);
         this.writer = new IndexWriter(directory, new IndexWriterConfig(analyzer));
         this.searchers = new SearcherManager(writer, null);
+        this.onCommit = onCommit;
     }
 
     /** Replaces the indexed document with the same id. */
@@ -104,6 +120,7 @@ public class LuceneIndex implements AutoCloseable {
         try {
             writer.commit();
             searchers.maybeRefreshBlocking();
+            onCommit.run(); // after the refresh: a search that sees the new generation also sees the new index
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

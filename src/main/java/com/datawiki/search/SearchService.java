@@ -13,6 +13,7 @@ import static com.datawiki.indexing.LuceneIndex.TAGS_TEXT;
 import static com.datawiki.indexing.LuceneIndex.TITLE;
 import static com.datawiki.indexing.LuceneIndex.UPDATED_AT;
 
+import com.datawiki.cache.SearchCache;
 import com.datawiki.documents.DocumentService;
 import com.datawiki.documents.DocumentService.DocumentMeta;
 import com.datawiki.indexing.LuceneIndex;
@@ -25,6 +26,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.TreeMap;
 import java.util.Set;
 import java.util.UUID;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
@@ -70,7 +73,8 @@ public class SearchService {
     public record Hit(DocumentMeta document, float score, List<Highlight> highlights) {
     }
 
-    public record SearchResult(String method, long total, int page, int size, List<Hit> hits, long tookMs) {
+    public record SearchResult(String method, long total, int page, int size, List<Hit> hits, long tookMs,
+                               boolean cached) {
     }
 
     private static final String DEFAULT_METHOD = "bm25";
@@ -87,8 +91,11 @@ public class SearchService {
     private final WikiAnalyzer analyzer;
     private final ScoringRegistry scoring;
     private final DocumentService documents;
+    private final SearchCache cache;
 
-    public SearchService(LuceneIndex index, WikiAnalyzer analyzer, ScoringRegistry scoring, DocumentService documents) {
+    public SearchService(LuceneIndex index, WikiAnalyzer analyzer, ScoringRegistry scoring, DocumentService documents,
+                         SearchCache cache) {
+        this.cache = cache;
         this.index = index;
         this.analyzer = analyzer;
         this.scoring = scoring;
@@ -104,7 +111,13 @@ public class SearchService {
 
         List<String> terms = terms(request.q());
         if (terms.isEmpty()) { // only stop words: nothing to match, and a filter-only query would match everything
-            return new SearchResult(method, 0, request.page(), request.size(), List.of(), millisSince(started));
+            return new SearchResult(method, 0, request.page(), request.size(), List.of(), millisSince(started), false);
+        }
+        Optional<String> key = cache.key(ownerId, cacheKey(terms, method, sortBy, request));
+        Optional<SearchResult> cached = key.flatMap(cache::get);
+        if (cached.isPresent()) {
+            SearchResult r = cached.get();
+            return new SearchResult(r.method(), r.total(), r.page(), r.size(), r.hits(), millisSince(started), true);
         }
         Query query = buildQuery(ownerId, terms, request);
 
@@ -116,7 +129,19 @@ public class SearchService {
                 .filter(c -> metas.containsKey(c.id()))
                 .map(c -> new Hit(metas.get(c.id()), c.score(), c.highlights()))
                 .toList();
-        return new SearchResult(method, found.total(), request.page(), request.size(), hits, millisSince(started));
+        SearchResult result = new SearchResult(method, found.total(), request.page(), request.size(), hits,
+                millisSince(started), false);
+        key.ifPresent(k -> cache.put(k, result));
+        return result;
+    }
+
+    /** Everything that changes the result, in a stable form: analyzed terms, not the raw query string. */
+    private static String cacheKey(List<String> terms, String method, SortBy sortBy, SearchRequest r) {
+        return List.of(terms, method, sortBy,
+                r.weights() == null ? "" : new TreeMap<>(r.weights()),
+                r.tags() == null ? List.of() : r.tags().stream().sorted().toList(),
+                String.valueOf(r.category()), String.valueOf(r.author()),
+                String.valueOf(r.updatedFrom()), String.valueOf(r.updatedTo()), r.page(), r.size()).toString();
     }
 
     private record Candidate(UUID id, float score, List<Highlight> highlights) {

@@ -34,7 +34,7 @@
 - [x] Очередь индексации (`index_tasks`), фоновый исполнитель (`IndexWorker`), пересборка индекса из PostgreSQL (`rebuild()`; эндпоинт `/api/admin/reindex` — с auth)
 - [x] Скоринг: TF-IDF, BM25 (`ScoringMethod`, `ScoringRegistry`; формулы сверены тестами с `docs/scoring.md`)
 - [x] Поиск: релевантность, фильтры, сортировка, подсветка (`SearchService`; REST — вместе с auth)
-- [ ] Redis-кэш запросов + инвалидация
+- [x] Redis-кэш запросов + инвалидация (`SearchCache`; `INCR index:gen` в `LuceneIndex.commit()`; TTL по умолчанию 300 с — уточнить у автора кейса)
 
 ## 4. Дополнительно
 - [x] Интерфейс скоринга + реестр методов, гибрид с весами (PG FTS — опционально, не сделан)

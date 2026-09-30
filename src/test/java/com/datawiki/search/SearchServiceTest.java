@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -31,6 +32,10 @@ class SearchServiceTest {
     @Container
     @ServiceConnection
     static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:17-alpine");
+
+    @Container
+    @ServiceConnection(name = "redis")
+    static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
 
     @Autowired
     SearchService search;
@@ -90,6 +95,27 @@ class SearchServiceTest {
             assertThat(ids(result)).as(method).containsExactly(inTitle, inBody);
             assertThat(result.total()).isEqualTo(2);
         }
+    }
+
+    @Test
+    void secondIdenticalSearchComesFromCache() {
+        add(alice, "# Cache\n\nredis cache test");
+
+        assertThat(search.search(alice, q("cache")).cached()).isFalse();
+        assertThat(search.search(alice, q("Cache")).cached()).isTrue(); // same analyzed terms
+        assertThat(search.search(bob, q("cache")).cached()).isFalse(); // other user, other key
+    }
+
+    @Test
+    void indexCommitInvalidatesCache() {
+        add(alice, "# One\n\nshared word");
+        assertThat(search.search(alice, q("shared")).total()).isEqualTo(1);
+
+        add(alice, "# Two\n\nshared word again");
+
+        var result = search.search(alice, q("shared"));
+        assertThat(result.cached()).isFalse();
+        assertThat(result.total()).isEqualTo(2);
     }
 
     @Test
