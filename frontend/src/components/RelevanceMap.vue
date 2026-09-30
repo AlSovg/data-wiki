@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Hit } from '../api'
+import type { Hit, Meta } from '../api'
 
 // Radial map on desktop, a linear scale on phones. Distance from the centre (or the left edge)
 // is the score relative to the top hit; the angle is a stable hash of the id, dot size is document length.
-const props = defineProps<{ hits: Hit[]; sel: string | null }>()
-const emit = defineEmits<{ pick: [id: string] }>()
+// Misses (documents the query did not match) sit hollow just outside the outer ring; the phone strip omits them.
+const props = defineProps<{ hits: Hit[]; misses: Meta[]; sel: string | null }>()
+const emit = defineEmits<{ pick: [id: string]; open: [id: string] }>()
 
 const C = 270, R0 = 20, R = 240
 const max = computed(() => Math.max(...props.hits.map((h) => h.score), 1e-9))
@@ -27,6 +28,13 @@ const dots = computed(() => props.hits.map((h, i) => {
     right: x < C + 150, pos: 3 + rel * 94,
   }
 }))
+// evenly spaced on the outer ring so they never pile up; labels point inward to stay inside the map
+const out = computed(() => props.misses.map((m, i) => {
+  const a = (i / props.misses.length) * 2 * Math.PI + Math.PI / 7
+  const x = C + R * Math.cos(a)
+  // labels only while they fit; with many misses the dots alone show the spread
+  return { id: m.id, title: m.title, label: props.misses.length <= 12 ? short(m.title) : '', x, y: C + R * Math.sin(a), right: x >= C }
+}))
 const ray = computed(() => dots.value.find((d) => d.id === props.sel))
 // ring radius -> the score it stands for
 const rings = computed(() => [1, .75, .5, .25].map((k) => ({ r: R * k, v: (max.value * (1 - (R * k - R0) / (R - R0))).toFixed(2) })))
@@ -39,6 +47,13 @@ const rings = computed(() => [1, .75, .5, .25].map((k) => ({ r: R * k, v: (max.v
       <circle v-for="g in rings" :key="g.r" :cx="C" :cy="C" :r="g.r" fill="none" stroke="var(--ring)" />
       <text v-for="g in rings" :key="'t' + g.r" :x="C + 4" :y="C - g.r - 4" class="scale">{{ g.v }}</text>
       <rect :x="C - 5" :y="C - 5" width="10" height="10" :transform="`rotate(45 ${C} ${C})`" fill="var(--surface)" stroke="var(--ink)" stroke-width="1.5" />
+      <g v-for="m in out" :key="m.id" class="miss" role="link" tabindex="0" :aria-label="`${m.title}, не найден`"
+         @click="emit('open', m.id)" @keydown.enter.prevent="emit('open', m.id)">
+        <title>{{ m.title }}</title>
+        <circle :cx="m.x" :cy="m.y" r="12" fill="transparent" />
+        <circle :cx="m.x" :cy="m.y" r="4" fill="var(--bg)" stroke="var(--hollow)" stroke-width="1.5" />
+        <text v-if="m.label" :x="m.right ? m.x - 9 : m.x + 9" :y="m.y + 4" :text-anchor="m.right ? 'end' : 'start'" class="miss-name">{{ m.label }}</text>
+      </g>
       <line v-if="ray" :x1="C" :y1="C" :x2="ray.x" :y2="ray.y" stroke="var(--accent)" />
       <g v-for="d in dots" :key="d.id" class="hit" role="button" tabindex="0" :aria-label="`${d.title}, скор ${d.score}`"
          :aria-pressed="d.id === sel" @click="emit('pick', d.id)" @keydown.enter.space.prevent="emit('pick', d.id)">
@@ -59,7 +74,10 @@ const rings = computed(() => [1, .75, .5, .25].map((k) => ({ r: R * k, v: (max.v
       </button>
     </div>
     <div class="ticks mono" aria-hidden="true"><span>{{ max.toFixed(2) }}</span><span>{{ (max / 2).toFixed(2) }}</span><span>0</span></div>
-    <p class="legend"><span class="dot" /> найден · ближе к центру — выше скор · размер точки — объём документа</p>
+    <p class="legend">
+      <span class="dot" /> найден <template v-if="misses.length"><span class="dot hollow" /> не найден</template>
+      · ближе к центру — выше скор · размер точки — объём документа
+    </p>
   </figure>
 </template>
 
@@ -71,7 +89,12 @@ const rings = computed(() => [1, .75, .5, .25].map((k) => ({ r: R * k, v: (max.v
 .hit:focus-visible circle:first-child { stroke: var(--accent); stroke-width: 2 }
 .name { font: 13px var(--sans); fill: var(--ink-2) }
 .num { font-family: var(--mono); fill: var(--muted) }
-.legend { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted) }
+.miss { cursor: pointer; outline: none }
+.miss:focus-visible circle:first-of-type { stroke: var(--accent); stroke-width: 2 }
+.miss-name { font: 12px var(--sans); fill: var(--faint) }
+.miss:hover .miss-name { fill: var(--ink-3) }
+.legend { margin: 0; font-size: 13px; color: var(--muted) }
+.legend .dot { vertical-align: -1px; margin-right: 4px }
 .strip, .ticks { display: none }
 
 @media (max-width: 720px) {

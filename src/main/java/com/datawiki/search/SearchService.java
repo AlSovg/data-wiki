@@ -73,11 +73,16 @@ public class SearchService {
     public record Hit(DocumentMeta document, float score, List<Highlight> highlights) {
     }
 
+    /**
+     * @param misses up to {@value #MAX_MISSES} of the owner's documents that pass the filters but not the query;
+     *               the client shows them on the relevance map as "not found"
+     */
     public record SearchResult(String method, long total, int page, int size, List<Hit> hits, long tookMs,
-                               boolean cached) {
+                               boolean cached, List<DocumentMeta> misses) {
     }
 
     private static final String DEFAULT_METHOD = "bm25";
+    private static final int MAX_MISSES = 50;
     private static final int MAX_QUERY_LENGTH = 500;
     private static final int MAX_PAGE_SIZE = 100;
     private static final int HIGHLIGHT_LIMIT = 200_000;
@@ -111,26 +116,32 @@ public class SearchService {
 
         List<String> terms = terms(request.q());
         if (terms.isEmpty()) { // only stop words: nothing to match, and a filter-only query would match everything
-            return new SearchResult(method, 0, request.page(), request.size(), List.of(), millisSince(started), false);
+            return new SearchResult(method, 0, request.page(), request.size(), List.of(), millisSince(started), false,
+                    List.of());
         }
         Optional<String> key = cache.key(ownerId, cacheKey(terms, method, sortBy, request));
         Optional<SearchResult> cached = key.flatMap(cache::get);
         if (cached.isPresent()) {
             SearchResult r = cached.get();
-            return new SearchResult(r.method(), r.total(), r.page(), r.size(), r.hits(), millisSince(started), true);
+            return new SearchResult(r.method(), r.total(), r.page(), r.size(), r.hits(), millisSince(started), true,
+                    r.misses() == null ? List.of() : r.misses()); // entries cached before misses existed
         }
-        Query query = buildQuery(ownerId, terms, request);
+        Query text = textQuery(terms);
+        Query query = withFilters(ownerId, request, text, Occur.MUST);
+        Query missQuery = withFilters(ownerId, request, text, Occur.MUST_NOT);
 
-        Found found = index.search(searcher -> find(searcher, query, method, request, sortBy));
-        List<UUID> ids = found.candidates().stream().map(Candidate::id).toList();
+        Found found = index.search(searcher -> find(searcher, query, missQuery, method, request, sortBy));
+        List<UUID> ids = new ArrayList<>(found.candidates().stream().map(Candidate::id).toList());
+        ids.addAll(found.misses());
         Map<UUID, DocumentMeta> metas = documents.metas(ownerId, ids);
         // documents deleted after the last index commit are dropped here
         List<Hit> hits = found.candidates().stream()
                 .filter(c -> metas.containsKey(c.id()))
                 .map(c -> new Hit(metas.get(c.id()), c.score(), c.highlights()))
                 .toList();
+        List<DocumentMeta> misses = found.misses().stream().filter(metas::containsKey).map(metas::get).toList();
         SearchResult result = new SearchResult(method, found.total(), request.page(), request.size(), hits,
-                millisSince(started), false);
+                millisSince(started), false, misses);
         key.ifPresent(k -> cache.put(k, result));
         return result;
     }
@@ -147,11 +158,11 @@ public class SearchService {
     private record Candidate(UUID id, float score, List<Highlight> highlights) {
     }
 
-    private record Found(long total, List<Candidate> candidates) {
+    private record Found(long total, List<Candidate> candidates, List<UUID> misses) {
     }
 
-    private Found find(IndexSearcher searcher, Query query, String method, SearchRequest request, SortBy sortBy)
-            throws IOException {
+    private Found find(IndexSearcher searcher, Query query, Query missQuery, String method, SearchRequest request,
+                       SortBy sortBy) throws IOException {
         int upTo = (request.page() + 1) * request.size();
         List<Scored> ranked;
         if (sortBy == SortBy.RELEVANCE) {
@@ -180,7 +191,11 @@ public class SearchService {
             UUID id = UUID.fromString(searcher.storedFields().document(docIds[i], Set.of(ID)).get(ID));
             candidates.add(new Candidate(id, pageDocs.get(i).score(), marks));
         }
-        return new Found(searcher.count(query), candidates);
+        List<UUID> misses = new ArrayList<>();
+        for (var d : searcher.search(missQuery, MAX_MISSES).scoreDocs) {
+            misses.add(UUID.fromString(searcher.storedFields().document(d.doc, Set.of(ID)).get(ID)));
+        }
+        return new Found(searcher.count(query), candidates, misses);
     }
 
     /** Snippets wrapped in {@code <mark>}; the text itself is HTML-escaped by the formatter. */
@@ -195,14 +210,19 @@ public class SearchService {
         return highlighter.highlightFields(HIGHLIGHT_FIELDS, query, docIds, HIGHLIGHT_PASSAGES);
     }
 
-    private Query buildQuery(UUID ownerId, List<String> terms, SearchRequest request) {
+    private static Query textQuery(List<String> terms) {
         BooleanQuery.Builder text = new BooleanQuery.Builder();
         for (String term : terms) {
             BOOSTS.forEach((field, boost) ->
                     text.add(new BoostQuery(new TermQuery(new Term(field, term)), boost), Occur.SHOULD));
         }
+        return text.build();
+    }
+
+    /** {@code MUST} gives the search itself, {@code MUST_NOT} the filtered documents the text does not match. */
+    private static Query withFilters(UUID ownerId, SearchRequest request, Query text, Occur occur) {
         BooleanQuery.Builder query = new BooleanQuery.Builder();
-        query.add(text.build(), Occur.MUST);
+        query.add(text, occur);
         query.add(new TermQuery(new Term(OWNER_ID, ownerId.toString())), Occur.FILTER);
         if (request.tags() != null) {
             request.tags().forEach(tag -> query.add(new TermQuery(new Term(TAGS, tag)), Occur.FILTER));

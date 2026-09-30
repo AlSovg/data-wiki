@@ -144,6 +144,19 @@ class SearchServiceTest {
                 Instant.now().minusSeconds(3600), Instant.now().plusSeconds(3600), null, 0, 10)).total()).isEqualTo(2);
     }
 
+    @Test
+    void listsFilteredDocumentsTheQueryMissed() {
+        add(alice, "---\ntags: [java]\n---\n# Hit\n\nsearch engine");
+        var miss = add(alice, "---\ntags: [java]\n---\n# Miss\n\nnothing relevant");
+        add(alice, "---\ntags: [go]\n---\n# Filtered out\n\nnothing relevant");
+        add(bob, "# Other user\n\nnothing relevant");
+
+        var result = search.search(alice, withTags(q("engine"), List.of("java")));
+
+        assertThat(result.misses()).extracting(m -> m.id()).containsExactly(miss);
+        assertThat(search.search(alice, withTags(q("engine"), List.of("java"))).misses()).hasSize(1); // from cache
+    }
+
     private SearchRequest withTags(SearchRequest r, List<String> tags) {
         return new SearchRequest(r.q(), null, null, tags, null, null, null, null, null, 0, 10);
     }

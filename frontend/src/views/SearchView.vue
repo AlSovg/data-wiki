@@ -39,7 +39,7 @@ async function run(p = 0) {
       // no query: plain document list
       const list = await api.documents({ tags: tags.value, category: category.value, author: author.value, page: p, size })
       result.value = {
-        method: '', total: list.total, page: list.page, size: list.size, tookMs: 0, cached: false,
+        method: '', total: list.total, page: list.page, size: list.size, tookMs: 0, cached: false, misses: [],
         hits: list.items.map((document) => ({ document, score: 0, highlights: [] })),
       }
     }
@@ -100,7 +100,8 @@ watch(() => props.tag, (t) => { if (t) { tags.value = t; filters.value = true; r
     <div v-if="error" role="alert" class="alert">{{ error }}</div>
 
     <div v-if="result" class="body" :class="{ list: !result.method }">
-      <RelevanceMap v-if="result.method && result.hits.length" :hits="result.hits" :sel="sel" @pick="sel = $event" />
+      <RelevanceMap v-if="result.method && result.hits.length" :hits="result.hits" :misses="result.misses" :sel="sel"
+                     @pick="sel = $event" @open="emit('open', $event)" />
       <section class="results" aria-label="Результаты">
         <h2 class="label">{{ result.method ? 'Результаты' : 'Документы' }}</h2>
         <p v-if="!result.hits.length" class="muted">Ничего не найдено.</p>

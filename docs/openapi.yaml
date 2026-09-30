@@ -487,6 +487,11 @@ components:
             hits:
               type: array
               items: { $ref: '#/components/schemas/Hit' }
+            misses:
+              type: array
+              maxItems: 50
+              items: { $ref: '#/components/schemas/DocumentMeta' }
+              description: Документы пользователя, прошедшие фильтры, но не совпавшие с запросом (для карты релевантности)
 
     Hit:
       type: object

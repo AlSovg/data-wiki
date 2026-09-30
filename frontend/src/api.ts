@@ -4,7 +4,7 @@ export interface Meta {
   version: number; sizeBytes: number; wordCount: number; createdAt: string; updatedAt: string
 }
 export interface Hit { document: Meta; score: number; highlights: { field: string; snippet: string }[] }
-export interface SearchResult { method: string; total: number; page: number; size: number; hits: Hit[]; tookMs: number; cached: boolean }
+export interface SearchResult { method: string; total: number; page: number; size: number; hits: Hit[]; tookMs: number; cached: boolean; misses: Meta[] }
 export interface Page { items: Meta[]; page: number; size: number; total: number }
 export interface Doc extends Meta { content: string; extra: Record<string, unknown> }
 export interface Version { version: number; createdAt: string }

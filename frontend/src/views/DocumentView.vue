@@ -166,6 +166,13 @@ dd { margin: 0 }
 .timeline button[aria-current] .mono { font-weight: 500 }
 .cur { margin-left: auto; font-size: 12px; color: var(--accent) }
 
+/* narrow window: editor above preview instead of two cramped columns */
+@media (max-width: 1100px) {
+  .work { grid-template-columns: minmax(0, 1fr) }
+  .editor { border-right: 0; border-bottom: 1px solid var(--line) }
+  textarea { min-height: 320px }
+}
+
 @media (max-width: 720px) {
   .toolbar .danger, .save, .state { display: none }
   h1 { font-size: 24px }
