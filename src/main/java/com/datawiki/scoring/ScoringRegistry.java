@@ -73,7 +73,7 @@ public class ScoringRegistry {
     }
 
     /** Scales to sum 1 and rejects unknown names, negative values and a zero sum. */
-    Map<String, Double> normalize(Map<String, Double> weights) {
+    public Map<String, Double> normalize(Map<String, Double> weights) {
         double sum = 0;
         for (var e : weights.entrySet()) {
             if (!methods.containsKey(e.getKey())) {

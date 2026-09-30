@@ -47,6 +47,7 @@ app:
     max-attempts: ${INDEX_MAX_ATTEMPTS:5}
   cache:
     ttl-seconds: ${CACHE_TTL_SECONDS:300}
+  admin-email: ${ADMIN_EMAIL:}
   jwt:
     secret: ${JWT_SECRET:}
     ttl-seconds: ${JWT_TTL_SECONDS:3600}

@@ -3,9 +3,13 @@ package com.datawiki.documents;
 import com.datawiki.markdown.ParsedDocument;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -217,16 +221,63 @@ public class DocumentService {
         return result;
     }
 
-    /** Newest first. Filters and sort options arrive with the API stage. */
-    @Transactional(readOnly = true)
+    /**
+     * @param tags the document must have all of them
+     * @param sort one of {@link #SORT_COLUMNS}; {@code null} means {@code updated_at}
+     */
+    public record ListFilter(List<String> tags, String category, String author, Instant updatedFrom,
+                             Instant updatedTo, String sort, boolean ascending) {
+        public static final ListFilter NONE = new ListFilter(null, null, null, null, null, null, false);
+    }
+
+    public static final Set<String> SORT_COLUMNS = Set.of("updated_at", "created_at", "title", "size_bytes");
+
+    /** Newest first. */
     public Page list(UUID ownerId, int page, int size) {
-        long total = jdbc.sql("select count(*) from documents where owner_id = :owner and deleted_at is null")
-                .param("owner", ownerId).query(Long.class).single();
-        List<DocumentMeta> items = jdbc.sql("""
-                        select * from documents where owner_id = :owner and deleted_at is null
-                        order by updated_at desc, id limit :size offset :offset
-                        """)
-                .param("owner", ownerId).param("size", size).param("offset", (long) page * size)
+        return list(ownerId, ListFilter.NONE, page, size);
+    }
+
+    /** @throws IllegalArgumentException unknown sort column or bad paging */
+    @Transactional(readOnly = true)
+    public Page list(UUID ownerId, ListFilter filter, int page, int size) {
+        String sort = filter.sort() == null ? "updated_at" : filter.sort();
+        if (!SORT_COLUMNS.contains(sort)) {
+            throw new IllegalArgumentException("sort must be one of " + new TreeSet<>(SORT_COLUMNS));
+        }
+        if (page < 0 || size < 1 || size > 100) {
+            throw new IllegalArgumentException("page must be >= 0 and size within 1..100");
+        }
+        Map<String, Object> params = new HashMap<>();
+        StringBuilder where = new StringBuilder("owner_id = :owner and deleted_at is null");
+        params.put("owner", ownerId);
+        List<String> tags = filter.tags() == null ? List.of() : filter.tags();
+        for (int i = 0; i < tags.size(); i++) {
+            where.append(" and exists (select 1 from document_tags dt join tags t on t.id = dt.tag_id"
+                    + " where dt.document_id = documents.id and t.name = :tag").append(i).append(')');
+            params.put("tag" + i, tags.get(i));
+        }
+        if (filter.category() != null) {
+            where.append(" and category = :category");
+            params.put("category", filter.category());
+        }
+        if (filter.author() != null) {
+            where.append(" and author = :author");
+            params.put("author", filter.author());
+        }
+        if (filter.updatedFrom() != null) {
+            where.append(" and updated_at >= :from");
+            params.put("from", OffsetDateTime.ofInstant(filter.updatedFrom(), ZoneOffset.UTC));
+        }
+        if (filter.updatedTo() != null) {
+            where.append(" and updated_at <= :to");
+            params.put("to", OffsetDateTime.ofInstant(filter.updatedTo(), ZoneOffset.UTC));
+        }
+        long total = jdbc.sql("select count(*) from documents where " + where).params(params)
+                .query(Long.class).single();
+        // sort comes from the SORT_COLUMNS whitelist, so concatenating it is safe
+        List<DocumentMeta> items = jdbc.sql("select * from documents where " + where + " order by " + sort
+                        + (filter.ascending() ? " asc" : " desc") + ", id limit :size offset :offset")
+                .params(params).param("size", size).param("offset", (long) page * size)
                 .query((rs, n) -> meta(rs.getObject("id", UUID.class), rs, n))
                 .list();
         return new Page(items, page, size, total);

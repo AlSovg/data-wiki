@@ -8,6 +8,7 @@ services:
       REDIS_HOST: redis
       JWT_SECRET: ${JWT_SECRET}
       JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-300}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
