@@ -12,14 +12,22 @@ const text = ref('')
 const versions = ref<Version[]>([])
 const error = ref('')
 const saved = ref(false)
+const shown = ref<number | null>(null)
+const pane = ref<'preview' | 'versions' | 'meta'>('preview')
 
-const preview = computed(() => DOMPurify.sanitize(marked.parse(text.value, { async: false }) as string))
+// frontmatter is metadata (shown in the aside), not content: marked would render it as a setext heading
+const body = computed(() => text.value.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, ''))
+const preview = computed(() => DOMPurify.sanitize(marked.parse(body.value, { async: false }) as string))
+const dirty = computed(() => !!doc.value && text.value !== doc.value.content)
+const date = (s: string) => new Date(s).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+const panes = [['preview', 'Превью'], ['versions', 'Версии'], ['meta', 'Метаданные']] as const
 
 async function load() {
   error.value = ''
   try {
     doc.value = await api.document(props.id)
     text.value = doc.value.content
+    shown.value = doc.value.version
     versions.value = await api.versions(props.id)
   } catch (e) {
     error.value = (e as Error).message
@@ -51,30 +59,126 @@ async function remove() {
 // Loads an old version into the editor; saving it creates a new version.
 async function showVersion(v: number) {
   text.value = (await api.version(props.id, v)).content
+  shown.value = v
 }
 
 watch(() => props.id, load, { immediate: true })
 </script>
 
 <template>
-  <div class="row">
-    <button @click="emit('close')">← К поиску</button>
-    <button class="primary" @click="save">Сохранить</button>
-    <button class="danger" @click="remove">Удалить</button>
-    <span v-if="saved" class="muted">сохранено</span>
-  </div>
-  <div v-if="error" class="err">{{ error }}</div>
-  <template v-if="doc">
-    <h2>{{ doc.title }}</h2>
-    <div class="muted">{{ doc.author }} · {{ doc.wordCount }} слов · версия {{ doc.version }}</div>
-    <div><span v-for="t in doc.tags" :key="t" class="tag" @click="emit('tag', t)">{{ t }}</span></div>
-    <div class="row muted" style="margin-top: 8px">
-      Версии:
-      <button v-for="v in versions" :key="v.version" @click="showVersion(v.version)">v{{ v.version }}</button>
+  <main class="page">
+    <div class="toolbar">
+      <button class="btn back" @click="emit('close')">← К результатам</button>
+      <span class="grow" />
+      <span v-if="dirty" class="state"><span class="dot" style="background: var(--accent)" /> Не сохранено</span>
+      <span v-else-if="saved" class="state muted" role="status">Сохранено</span>
+      <button class="btn danger" @click="remove">Удалить</button>
+      <button v-if="doc" class="btn primary save" :disabled="!dirty" @click="save">Сохранить как v{{ doc.version + 1 }}</button>
     </div>
-    <div class="split">
-      <textarea v-model="text" spellcheck="false" />
-      <div class="preview" v-html="preview" />
-    </div>
-  </template>
+    <div v-if="error" role="alert" class="alert">{{ error }}</div>
+    <template v-if="doc">
+      <header>
+        <h1>{{ doc.title }}</h1>
+        <p class="muted meta">
+          {{ doc.author }}<template v-if="doc.category"> · {{ doc.category }}</template> · {{ doc.wordCount }} слов ·
+          {{ (doc.sizeBytes / 1024).toFixed(1) }} КБ · {{ date(doc.updatedAt) }}
+        </p>
+      </header>
+      <div class="tabs" role="tablist" aria-label="Разделы документа">
+        <button v-for="[k, l] in panes" :key="k" role="tab" :aria-selected="pane === k" @click="pane = k">{{ l }}</button>
+      </div>
+      <div class="layout" :data-pane="pane">
+        <section class="panel work">
+          <label class="editor">
+            <span class="label">Markdown</span>
+            <textarea v-model="text" class="mono" spellcheck="false" />
+          </label>
+          <div class="pv">
+            <span class="label">Превью</span>
+            <article class="md" v-html="preview" />
+          </div>
+          <p class="note muted">Редактирование доступно на компьютере</p>
+        </section>
+        <aside class="side">
+          <section class="meta-box">
+            <h2 class="label">Метаданные</h2>
+            <dl>
+              <dt>Автор</dt><dd>{{ doc.author }}</dd>
+              <dt>Категория</dt><dd>{{ doc.category ?? '—' }}</dd>
+              <dt>Создан</dt><dd>{{ date(doc.createdAt) }}</dd>
+              <dt>Слов</dt><dd class="mono">{{ doc.wordCount }}</dd>
+              <dt>Размер</dt><dd class="mono">{{ doc.sizeBytes }} Б</dd>
+            </dl>
+            <div class="tags"><button v-for="t in doc.tags" :key="t" class="chip" @click="emit('tag', t)">{{ t }}</button></div>
+          </section>
+          <section class="ver-box">
+            <h2 class="label">Версии</h2>
+            <ol class="timeline">
+              <li v-if="dirty" class="draft"><span class="dot hollow" /> <span>Черновик</span> <span class="muted">не сохранён</span></li>
+              <li v-for="v in [...versions].sort((a, b) => b.version - a.version)" :key="v.version">
+                <button :aria-current="shown === v.version ? 'true' : undefined" @click="showVersion(v.version)">
+                  <span class="dot" :class="{ hollow: shown !== v.version }" />
+                  <span class="mono">v{{ v.version }}</span>
+                  <span class="muted">{{ date(v.createdAt) }}</span>
+                  <span v-if="v.version === doc.version" class="cur">текущая</span>
+                </button>
+              </li>
+            </ol>
+          </section>
+        </aside>
+      </div>
+    </template>
+  </main>
 </template>
+
+<style scoped>
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap }
+.back { border: 0; padding: 0; color: var(--ink-3) }
+.grow { flex: 1 }
+.state { display: inline-flex; align-items: center; gap: 8px; font-size: 14px }
+.meta { margin: 8px 0 0; font-size: 14px }
+.tabs { display: none }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 32px; align-items: start }
+.work { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 560px }
+.editor, .pv { display: flex; flex-direction: column; gap: 0; padding: 16px 20px; min-width: 0 }
+.editor { border-right: 1px solid var(--line) }
+.editor .label, .pv .label { border-bottom-color: var(--line); margin-bottom: 12px }
+textarea { flex: 1; min-height: 480px; padding: 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--code); font-size: 13px; line-height: 1.6; resize: vertical }
+.note { display: none }
+.md { font-size: 15px; line-height: 1.65; overflow-wrap: anywhere }
+.md :deep(h1), .md :deep(h2), .md :deep(h3) { margin: 1em 0 .4em; line-height: 1.25 }
+.md :deep(h1) { font-size: 24px }
+.md :deep(h2) { font-size: 19px }
+.md :deep(pre), .md :deep(code) { font-family: var(--mono); font-size: 13px; background: var(--code) }
+.md :deep(pre) { padding: 12px; border: 1px solid var(--line); border-radius: 4px; overflow-x: auto }
+.md :deep(table) { border-collapse: collapse }
+.md :deep(th), .md :deep(td) { padding: 4px 10px; border: 1px solid var(--line) }
+.md :deep(blockquote) { margin: 0; padding-left: 14px; border-left: 2px solid var(--border); color: var(--ink-3) }
+.side { display: flex; flex-direction: column; gap: 28px }
+dl { margin: 12px 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px }
+dt { color: var(--muted) }
+dd { margin: 0 }
+.tags { display: flex; flex-wrap: wrap; gap: 6px }
+.timeline { margin: 12px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px }
+.timeline li.draft { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 14px }
+.timeline button { width: 100%; min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 8px; margin: 0 -8px; border: 0; border-radius: 4px; background: none; font-size: 14px; text-align: left }
+.timeline button:hover { background: var(--line-2) }
+.timeline button[aria-current] .mono { font-weight: 500 }
+.cur { margin-left: auto; font-size: 12px; color: var(--accent) }
+
+@media (max-width: 720px) {
+  .toolbar .danger, .save, .state { display: none }
+  h1 { font-size: 24px }
+  .tabs { display: flex; border-bottom: 1px solid var(--line) }
+  .tabs button { flex: 1; height: 44px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; color: var(--muted) }
+  .tabs button[aria-selected='true'] { border-bottom-color: var(--ink); color: var(--ink); font-weight: 500 }
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 0 }
+  .work { grid-template-columns: minmax(0, 1fr); min-height: 0 }
+  .editor, .pv .label { display: none }
+  .note { display: block; margin: 0; padding: 12px 20px; border-top: 1px solid var(--line); font-size: 13px }
+  .layout:not([data-pane='preview']) .work,
+  .layout:not([data-pane='meta']) .meta-box,
+  .layout:not([data-pane='versions']) .ver-box { display: none }
+  .side .label { display: none }
+}
+</style>

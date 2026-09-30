@@ -14,10 +14,12 @@ export interface ImportReport { files: { path: string; status: string; documentI
 export interface Settings { method: string; weights: Record<string, number> | null }
 
 const KEY = 'dw_token'
+const EMAIL = 'dw_email' // the token carries only the user id; the header shows the email
 export const token = {
   get: () => localStorage.getItem(KEY),
-  set: (t: string) => localStorage.setItem(KEY, t),
-  clear: () => localStorage.removeItem(KEY),
+  set: (t: string, email: string) => { localStorage.setItem(KEY, t); localStorage.setItem(EMAIL, email) },
+  email: () => localStorage.getItem(EMAIL) ?? '',
+  clear: () => { localStorage.removeItem(KEY); localStorage.removeItem(EMAIL) },
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
