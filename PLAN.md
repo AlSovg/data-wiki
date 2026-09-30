@@ -31,7 +31,7 @@
 - [x] Парсер Markdown: структура, frontmatter, чистый текст, валидация/нормализация
 - [x] Хранение документов + версии (`DocumentService`, миграция V2; REST-слой — вместе с auth/импортом, `index_tasks` и `search_settings` — со своими этапами)
 - [x] Токенизация и индекс: `WikiAnalyzer` (RU+EN, Snowball), `LuceneIndex` (upsert/delete/commit, поля по system-design §4)
-- [ ] Очередь индексации (`index_tasks`), фоновый исполнитель, пересборка индекса из PostgreSQL
+- [x] Очередь индексации (`index_tasks`), фоновый исполнитель (`IndexWorker`), пересборка индекса из PostgreSQL (`rebuild()`; эндпоинт `/api/admin/reindex` — с auth)
 - [ ] Скоринг: TF-IDF, BM25
 - [ ] Поиск: релевантность, фильтры, сортировка, подсветка
 - [ ] Redis-кэш запросов + инвалидация

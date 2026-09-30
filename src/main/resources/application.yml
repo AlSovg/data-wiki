@@ -41,6 +41,10 @@ app:
   lucene:
     index-dir: ${LUCENE_INDEX_DIR:./lucene-index}
     stemming: ${LUCENE_STEMMING:true}
+  index:
+    poll-ms: ${INDEX_POLL_MS:1000}
+    batch-size: ${INDEX_BATCH_SIZE:100}
+    max-attempts: ${INDEX_MAX_ATTEMPTS:5}
   jwt:
     secret: ${JWT_SECRET:}
     ttl-seconds: ${JWT_TTL_SECONDS:3600}

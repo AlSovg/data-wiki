@@ -90,6 +90,15 @@ public class LuceneIndex implements AutoCloseable {
         }
     }
 
+    /** Drops every document; used before a rebuild. Takes effect on {@link #commit()}. */
+    public void clear() {
+        try {
+            writer.deleteAll();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     /** Makes upserts and deletes durable and visible to {@link #search}. */
     public void commit() {
         try {

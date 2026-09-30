@@ -40,6 +40,10 @@ public class DocumentService {
     public record StoredVersion(VersionSummary summary, String content, Map<String, Object> extra) {
     }
 
+    /** A live document as the indexer needs it; not owner-filtered, for internal use only. */
+    public record IndexableDocument(UUID ownerId, DocumentMeta meta, String content) {
+    }
+
     public record Page(List<DocumentMeta> items, int page, int size, long total) {
     }
 
@@ -91,6 +95,7 @@ public class DocumentService {
         }
         insertVersion(id, 1, ownerId, doc);
         replaceTags(ownerId, id, doc.tags());
+        enqueueIndexing(id);
         return new SaveResult(id, Outcome.CREATED);
     }
 
@@ -123,6 +128,7 @@ public class DocumentService {
         }
         insertVersion(id, version, ownerId, doc);
         replaceTags(ownerId, id, doc.tags());
+        enqueueIndexing(id);
         return new SaveResult(id, Outcome.UPDATED);
     }
 
@@ -135,6 +141,22 @@ public class DocumentService {
         if (n == 0) {
             throw new NotFoundException(id);
         }
+        enqueueIndexing(id);
+    }
+
+    /** Live document by id regardless of owner; {@code empty} if it is deleted or unknown. */
+    @Transactional(readOnly = true)
+    public Optional<IndexableDocument> findForIndex(UUID id) {
+        return jdbc.sql("""
+                        select d.*, v.content
+                        from documents d
+                        join document_versions v on v.document_id = d.id and v.version = d.current_version
+                        where d.id = :id and d.deleted_at is null
+                        """)
+                .param("id", id)
+                .query((rs, n) -> new IndexableDocument(rs.getObject("owner_id", UUID.class),
+                        meta(id, rs, n), rs.getString("content")))
+                .optional();
     }
 
     @Transactional(readOnly = true)
@@ -202,6 +224,11 @@ public class DocumentService {
                 .param("id", id).param("version", version).param("content", doc.content())
                 .param("extra", json.writeValueAsString(doc.extra())).param("user", userId)
                 .update();
+    }
+
+    /** Same transaction as the change, so the task is never lost between PostgreSQL and Lucene. */
+    private void enqueueIndexing(UUID id) {
+        jdbc.sql("insert into index_tasks (document_id) values (:id)").param("id", id).update();
     }
 
     private void replaceTags(UUID ownerId, UUID id, List<String> names) {
