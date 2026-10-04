@@ -10,8 +10,8 @@
 
 ```mermaid
 flowchart LR
-    U[Пользователь] --> N[nginx + Vue SPA]
-    N -->|REST /api| A[Spring Boot]
+    U[Пользователь] --> N[nginx reverse proxy]
+    N -->|SPA + REST| A["Spring Boot + Vue SPA (статика)"]
     A --> PG[(PostgreSQL)]
     A --> R[(Redis)]
     A --> L[(Lucene index, том)]

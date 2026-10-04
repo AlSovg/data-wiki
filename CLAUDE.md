@@ -34,7 +34,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - commonmark-java (+ расширения tables, strikethrough, task-list, yaml-front-matter)
 - springdoc-openapi — OpenAPI/Swagger
 - JUnit 5 + Testcontainers — unit и интеграционные тесты
-- Frontend: Vue 3 + Vite + TypeScript (SPA, статика через nginx). SSR/Nuxt не нужен: приложение закрыто авторизацией. HTML подсветки (`<mark>`) и превью Markdown санитизировать (DOMPurify)
+- Frontend: Vue 3 + Vite + TypeScript (SPA; собирается в образе приложения и отдаётся Spring Boot как статика, nginx — reverse proxy). SSR/Nuxt не нужен: приложение закрыто авторизацией. HTML подсветки (`<mark>`) и превью Markdown санитизировать (DOMPurify)
 - Docker + docker-compose, конфиг через переменные окружения
 
 Индекс Lucene — на диске (том), это единственный экземпляр сервиса; ограничение указать в System Design. Индекс можно пересобрать из PostgreSQL.
