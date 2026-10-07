@@ -1,6 +1,6 @@
 # Скоринг: BM25, TF-IDF, гибрид
 
-Формулы BM25 и TF-IDF сверены с исходниками Lucene 10.5.1 (`BM25Similarity`, `ClassicSimilarity`, `TFIDFSimilarity`, `Similarity`). Что именно требуется от проекта (настройка Lucene или собственная реализация) — вопрос 2 в `docs/questions-for-case-author.md`.
+Формулы BM25 и TF-IDF сверены с исходниками Lucene 10.5.1 (`BM25Similarity`, `ClassicSimilarity`, `TFIDFSimilarity`, `Similarity`).
 
 ## Обозначения
 

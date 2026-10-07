@@ -2,7 +2,7 @@
 
 Сервис личной базы знаний: импорт Markdown, полнотекстовый поиск на Lucene (BM25, TF-IDF, гибрид с весами), подсветка совпадений, кэш запросов в Redis, версии документов, шаринг по ссылке, JWT и изоляция данных по пользователю. Клиент — Vue 3 + Vite.
 
-Документация: [System Design](docs/system-design.md) · [алгоритмы скоринга](docs/scoring.md) · [требования](docs/requirements.md) · [OpenAPI](docs/openapi.yaml) · [замер индексации](docs/benchmark.md) · [вопросы автору кейса](docs/questions-for-case-author.md).
+Документация: [System Design](docs/system-design.md) · [алгоритмы скоринга](docs/scoring.md) · [требования](docs/requirements.md) · [OpenAPI](docs/openapi.yaml) · [замер индексации](docs/benchmark.md).
 
 ## Архитектура
 

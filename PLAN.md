@@ -20,7 +20,6 @@
 - [x] Остальной стек: JDK 25, Spring Boot 4.1, Maven, PostgreSQL + Flyway, Redis, Spring Security (JWT), commonmark-java, springdoc, JUnit 5 + Testcontainers, Vue 3 + Vite SPA
 - [x] Уровень доступа к документам: владелец + шаринг по ссылке (просмотр / редактирование), как в Google Drive (`system-design.md`, раздел 9; миграция V5, `SharedController`)
 - [x] Черновик архитектуры и диаграммы компонентов (`docs/system-design.md`)
-- [x] Вопросы автору кейса (`docs/questions-for-case-author.md`) — ответов не будет, решения приняты самостоятельно
 - [x] Черновая схема БД (без прав) — миграции при создании каркаса
 - [x] Набросок API, оформлен в `docs/openapi.yaml`
 - [x] Формулы BM25, TF-IDF и гибрид (`docs/scoring.md`)
