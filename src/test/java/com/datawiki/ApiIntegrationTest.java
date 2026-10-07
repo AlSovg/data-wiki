@@ -131,6 +131,47 @@ class ApiIntegrationTest {
     }
 
     @Test
+    void shareLinksGrantViewOrEditUntilRevoked() throws Exception {
+        String alice = token("alice@example.com");
+        String bob = token("bob@example.com");
+        String id = upload(alice, "s.md", "# Shared\n\nfirst text");
+
+        mvc.perform(put("/api/documents/" + id + "/links/VIEW").header("Authorization", bob))
+                .andExpect(status().isNotFound());
+        String view = linkToken(alice, id, "VIEW");
+        String edit = linkToken(alice, id, "EDIT");
+        assertThat(linkToken(alice, id, "VIEW")).isEqualTo(view);
+
+        mvc.perform(get("/api/shared/" + view)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/shared/" + view).header("Authorization", bob))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Shared"))
+                .andExpect(jsonPath("$.permission").value("VIEW"));
+        String body = "{\"content\":\"# Shared\\n\\nsecond text\"}";
+        mvc.perform(put("/api/shared/" + view).header("Authorization", bob)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isForbidden());
+        mvc.perform(put("/api/shared/" + edit).header("Authorization", bob)
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(2));
+        mvc.perform(get("/api/documents/" + id + "/versions").header("Authorization", alice))
+                .andExpect(jsonPath("$[0].createdBy").value(jdbc.sql("select id::text from users where email = :e")
+                        .param("e", "bob@example.com").query(String.class).single()));
+
+        mvc.perform(delete("/api/documents/" + id + "/links/EDIT").header("Authorization", alice))
+                .andExpect(status().isNoContent());
+        mvc.perform(get("/api/shared/" + edit).header("Authorization", bob)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/documents/" + id + "/links").header("Authorization", alice))
+                .andExpect(jsonPath("$.length()").value(1));
+    }
+
+    private String linkToken(String auth, String id, String permission) throws Exception {
+        var res = mvc.perform(put("/api/documents/" + id + "/links/" + permission).header("Authorization", auth))
+                .andExpect(status().isOk()).andReturn();
+        return json.readTree(res.getResponse().getContentAsString()).get("token").asString();
+    }
+
+    @Test
     void importsZipAndReportsPerFileStatus() throws Exception {
         String auth = token("alice@example.com");
         var bytes = new ByteArrayOutputStream();

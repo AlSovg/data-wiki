@@ -8,6 +8,9 @@ export interface SearchResult { method: string; total: number; page: number; siz
 export interface Page { items: Meta[]; page: number; size: number; total: number }
 export interface Doc extends Meta { content: string; extra: Record<string, unknown> }
 export interface Version { version: number; createdAt: string }
+export type Permission = 'VIEW' | 'EDIT'
+export interface ShareLink { token: string; permission: Permission; createdAt: string }
+export interface SharedDoc extends Doc { permission: Permission }
 export interface Bucket { key: string; count: number }
 export interface Stats { documents: number; totalSizeBytes: number; totalWords: number; byTag: Bucket[]; byCategory: Bucket[]; byAuthor: Bucket[] }
 export interface ImportReport { files: { path: string; status: string; documentId: string | null; reason: string | null; warnings: string[] }[]; created: number; duplicates: number; rejected: number }
@@ -55,6 +58,11 @@ export const api = {
   version: (id: string, v: number) => call<{ content: string }>(`/api/documents/${id}/versions/${v}`),
   save: (id: string, content: string) => call<Doc>(`/api/documents/${id}`, { method: 'PUT', body: JSON.stringify({ content }) }),
   remove: (id: string) => call<void>(`/api/documents/${id}`, { method: 'DELETE' }),
+  links: (id: string) => call<ShareLink[]>(`/api/documents/${id}/links`),
+  createLink: (id: string, p: Permission) => call<ShareLink>(`/api/documents/${id}/links/${p}`, { method: 'PUT' }),
+  revokeLink: (id: string, p: Permission) => call<void>(`/api/documents/${id}/links/${p}`, { method: 'DELETE' }),
+  shared: (t: string) => call<SharedDoc>(`/api/shared/${t}`),
+  saveShared: (t: string, content: string) => call<SharedDoc>(`/api/shared/${t}`, { method: 'PUT', body: JSON.stringify({ content }) }),
   stats: () => call<Stats>('/api/stats'),
   upload: (files: File[]) => {
     const f = new FormData()

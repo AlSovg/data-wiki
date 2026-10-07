@@ -2,9 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
-import { api, type Doc, type Version } from '../api'
+import { api, type Doc, type Permission, type ShareLink, type Version } from '../api'
 
-const props = defineProps<{ id: string }>()
+// opened either by the owner (id) or by a share link (shareToken)
+const props = defineProps<{ id?: string; shareToken?: string }>()
 const emit = defineEmits<{ close: []; tag: [tag: string] }>()
 
 const doc = ref<Doc | null>(null)
@@ -14,21 +15,37 @@ const error = ref('')
 const saved = ref(false)
 const shown = ref<number | null>(null)
 const pane = ref<'preview' | 'versions' | 'meta'>('preview')
+const permission = ref<Permission | null>(null) // set only for a shared document
+const links = ref<ShareLink[]>([])
+const copied = ref<Permission | null>(null)
+const readOnly = computed(() => permission.value === 'VIEW')
+const linkKinds = [['VIEW', 'Просмотр'], ['EDIT', 'Редактирование']] as const
+const linkUrl = (p: Permission) => {
+  const l = links.value.find((x) => x.permission === p)
+  return l ? `${location.origin}${location.pathname}#s/${l.token}` : null
+}
 
 // frontmatter is metadata (shown in the aside), not content: marked would render it as a setext heading
 const body = computed(() => text.value.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, ''))
 const preview = computed(() => DOMPurify.sanitize(marked.parse(body.value, { async: false }) as string))
 const dirty = computed(() => !!doc.value && text.value !== doc.value.content)
 const date = (s: string) => new Date(s).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-const panes = [['preview', 'Превью'], ['versions', 'Версии'], ['meta', 'Метаданные']] as const
+const panes = computed(() => ([['preview', 'Превью'], ['versions', 'Версии'], ['meta', 'Метаданные']] as const)
+  .filter(([k]) => !props.shareToken || k !== 'versions'))
 
 async function load() {
   error.value = ''
   try {
-    doc.value = await api.document(props.id)
+    if (props.shareToken) {
+      const d = await api.shared(props.shareToken)
+      permission.value = d.permission
+      doc.value = d
+    } else {
+      doc.value = await api.document(props.id!)
+    }
     text.value = doc.value.content
     shown.value = doc.value.version
-    versions.value = await api.versions(props.id)
+    if (!props.shareToken) [versions.value, links.value] = await Promise.all([api.versions(props.id!), api.links(props.id!)])
   } catch (e) {
     error.value = (e as Error).message
   }
@@ -37,7 +54,7 @@ async function load() {
 async function save() {
   error.value = ''
   try {
-    await api.save(props.id, text.value)
+    await (props.shareToken ? api.saveShared(props.shareToken, text.value) : api.save(props.id!, text.value))
     saved.value = true
     setTimeout(() => (saved.value = false), 2000)
     await load()
@@ -49,7 +66,7 @@ async function save() {
 async function remove() {
   if (!confirm('Удалить документ?')) return
   try {
-    await api.remove(props.id)
+    await api.remove(props.id!)
     emit('close')
   } catch (e) {
     error.value = (e as Error).message
@@ -58,22 +75,48 @@ async function remove() {
 
 // Loads an old version into the editor; saving it creates a new version.
 async function showVersion(v: number) {
-  text.value = (await api.version(props.id, v)).content
+  text.value = (await api.version(props.id!, v)).content
   shown.value = v
 }
 
-watch(() => props.id, load, { immediate: true })
+async function createLink(p: Permission) {
+  try {
+    await api.createLink(props.id!, p)
+    links.value = await api.links(props.id!)
+  } catch (e) {
+    error.value = (e as Error).message
+  }
+}
+
+async function revokeLink(p: Permission) {
+  if (!confirm('Отключить ссылку? Открыть документ по ней больше не получится.')) return
+  try {
+    await api.revokeLink(props.id!, p)
+    links.value = await api.links(props.id!)
+  } catch (e) {
+    error.value = (e as Error).message
+  }
+}
+
+async function copyLink(p: Permission) {
+  await navigator.clipboard.writeText(linkUrl(p)!)
+  copied.value = p
+  setTimeout(() => (copied.value = null), 2000)
+}
+
+watch(() => [props.id, props.shareToken], load, { immediate: true })
 </script>
 
 <template>
   <main class="page">
     <div class="toolbar">
-      <button class="btn back" @click="emit('close')">← К результатам</button>
+      <button class="btn back" @click="emit('close')">{{ shareToken ? '← К поиску' : '← К результатам' }}</button>
       <span class="grow" />
       <span v-if="dirty" class="state"><span class="dot" style="background: var(--accent)" /> Не сохранено</span>
       <span v-else-if="saved" class="state muted" role="status">Сохранено</span>
-      <button class="btn danger" @click="remove">Удалить</button>
-      <button v-if="doc" class="btn primary save" :disabled="!dirty" @click="save">Сохранить как v{{ doc.version + 1 }}</button>
+      <span v-if="permission" class="state muted">{{ readOnly ? 'Только просмотр' : 'Совместное редактирование' }}</span>
+      <button v-if="!shareToken" class="btn danger" @click="remove">Удалить</button>
+      <button v-if="doc && !readOnly" class="btn primary save" :disabled="!dirty" @click="save">Сохранить как v{{ doc.version + 1 }}</button>
     </div>
     <div v-if="error" role="alert" class="alert">{{ error }}</div>
     <template v-if="doc">
@@ -91,7 +134,7 @@ watch(() => props.id, load, { immediate: true })
         <section class="panel work">
           <label class="editor">
             <span class="label">Markdown</span>
-            <textarea v-model="text" class="mono" spellcheck="false" />
+            <textarea v-model="text" class="mono" spellcheck="false" :readonly="readOnly" />
           </label>
           <div class="pv">
             <span class="label">Превью</span>
@@ -109,9 +152,29 @@ watch(() => props.id, load, { immediate: true })
               <dt>Слов</dt><dd class="mono">{{ doc.wordCount }}</dd>
               <dt>Размер</dt><dd class="mono">{{ doc.sizeBytes }} Б</dd>
             </dl>
-            <div class="tags"><button v-for="t in doc.tags" :key="t" class="chip" @click="emit('tag', t)">{{ t }}</button></div>
+            <div class="tags">
+              <template v-for="t in doc.tags" :key="t">
+                <span v-if="shareToken" class="chip">{{ t }}</span>
+                <button v-else class="chip" @click="emit('tag', t)">{{ t }}</button>
+              </template>
+            </div>
           </section>
-          <section class="ver-box">
+          <section v-if="!shareToken" class="share-box">
+            <h2 class="label">Доступ по ссылке</h2>
+            <p class="muted hint">Открыть сможет любой вошедший пользователь, у кого есть ссылка</p>
+            <div v-for="[p, l] in linkKinds" :key="p" class="share-row">
+              <span>{{ l }}</span>
+              <template v-if="linkUrl(p)">
+                <input class="field mono" :value="linkUrl(p)!" readonly :aria-label="`Ссылка: ${l}`" @focus="($event.target as HTMLInputElement).select()">
+                <div class="share-actions">
+                  <button class="btn" @click="copyLink(p)">{{ copied === p ? 'Скопировано' : 'Копировать' }}</button>
+                  <button class="btn danger" @click="revokeLink(p)">Отключить</button>
+                </div>
+              </template>
+              <button v-else class="btn dashed" @click="createLink(p)">Создать ссылку</button>
+            </div>
+          </section>
+          <section v-if="!shareToken" class="ver-box">
             <h2 class="label">Версии</h2>
             <ol class="timeline">
               <li v-if="dirty" class="draft"><span class="dot hollow" /> <span>Черновик</span> <span class="muted">не сохранён</span></li>
@@ -165,6 +228,11 @@ dd { margin: 0 }
 .timeline button:hover { background: var(--line-2) }
 .timeline button[aria-current] .mono { font-weight: 500 }
 .cur { margin-left: auto; font-size: 12px; color: var(--accent) }
+.hint { margin: 10px 0 4px; font-size: 13px }
+.share-row { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 0; font-size: 14px }
+.share-row + .share-row { border-top: 1px solid var(--line) }
+.share-row .field { width: 100%; height: 36px; font-size: 12px }
+.share-actions { display: flex; gap: 8px }
 
 /* narrow window: editor above preview instead of two cramped columns */
 @media (max-width: 1100px) {
@@ -185,6 +253,7 @@ dd { margin: 0 }
   .note { display: block; margin: 0; padding: 12px 20px; border-top: 1px solid var(--line); font-size: 13px }
   .layout:not([data-pane='preview']) .work,
   .layout:not([data-pane='meta']) .meta-box,
+  .layout:not([data-pane='meta']) .share-box,
   .layout:not([data-pane='versions']) .ver-box { display: none }
   .side .label { display: none }
 }

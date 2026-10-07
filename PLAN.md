@@ -18,9 +18,9 @@
 ## 2. System Design
 - [x] Поисковое ядро: Java + Lucene (см. CLAUDE.md)
 - [x] Остальной стек: JDK 25, Spring Boot 4.1, Maven, PostgreSQL + Flyway, Redis, Spring Security (JWT), commonmark-java, springdoc, JUnit 5 + Testcontainers, Vue 3 + Vite SPA
-- [ ] Уровень доступа к документам (ждём ответ автора кейса): 1 — только владелец, 2 — шаринг пользователям (чтение/правка), 3 — команды. Пока проектируем уровень 1 (владелец) с точками расширения под шаринг (`system-design.md`, раздел 9)
+- [x] Уровень доступа к документам: владелец + шаринг по ссылке (просмотр / редактирование), как в Google Drive (`system-design.md`, раздел 9; миграция V5, `SharedController`)
 - [x] Черновик архитектуры и диаграммы компонентов (`docs/system-design.md`)
-- [ ] Вопросы автору кейса (`docs/questions-for-case-author.md`) — отправить, внести ответы
+- [x] Вопросы автору кейса (`docs/questions-for-case-author.md`) — ответов не будет, решения приняты самостоятельно
 - [x] Черновая схема БД (без прав) — миграции при создании каркаса
 - [x] Набросок API, оформлен в `docs/openapi.yaml`
 - [x] Формулы BM25, TF-IDF и гибрид (`docs/scoring.md`)
@@ -38,7 +38,7 @@
 
 ## 4. Дополнительно
 - [x] Интерфейс скоринга + реестр методов, гибрид с весами (PG FTS — опционально, не сделан)
-- [x] JWT-аутентификация, изоляция данных, REST-слой (`auth`, `documents`, `search`, `stats`, `importer`, `admin`; тесты — `ApiIntegrationTest`). Права: уровень 1 (владелец) + роль ADMIN для reindex — ждём ответ автора кейса (вопрос 6)
+- [x] JWT-аутентификация, изоляция данных, REST-слой (`auth`, `documents`, `search`, `stats`, `importer`, `admin`; тесты — `ApiIntegrationTest`). Права: владелец + шаринг по ссылке, роль ADMIN для reindex
 - [x] Vue 3 + Vite клиент (`frontend/`): вход, поиск с фильтрами и подсветкой, просмотр/правка с версиями и превью (DOMPurify), импорт, статистика; собирается в корневом `Dockerfile` и отдаётся Spring Boot как статика, nginx — reverse proxy
 
 ## 5. Тестирование

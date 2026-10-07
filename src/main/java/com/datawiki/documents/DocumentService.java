@@ -1,9 +1,11 @@
 package com.datawiki.documents;
 
 import com.datawiki.markdown.ParsedDocument;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,8 +21,8 @@ import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Documents and their versions in PostgreSQL. Every method takes the owner id and filters by it;
- * access checks for sharing would go here (see system-design, section 9).
+ * Documents, their versions and share links in PostgreSQL. Every method takes the owner id and filters by it;
+ * a share link resolves to the owner id ({@link #resolveLink}), so shared access reuses the same methods.
  */
 @Service
 public class DocumentService {
@@ -51,6 +53,15 @@ public class DocumentService {
     public record Page(List<DocumentMeta> items, int page, int size, long total) {
     }
 
+    public enum Permission { VIEW, EDIT }
+
+    public record ShareLink(String token, Permission permission, Instant createdAt) {
+    }
+
+    /** What a share link opens: a live document of {@code ownerId}. */
+    public record SharedAccess(UUID ownerId, UUID documentId, Permission permission) {
+    }
+
     public static class NotFoundException extends RuntimeException {
         public NotFoundException(UUID id) {
             super("Document not found: " + id);
@@ -65,6 +76,8 @@ public class DocumentService {
     }
 
     private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() { };
+
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private final JdbcClient jdbc;
     private final JsonMapper json;
@@ -106,6 +119,12 @@ public class DocumentService {
     /** Edit: a new version, unless the normalized content is unchanged. */
     @Transactional
     public SaveResult update(UUID ownerId, UUID id, ParsedDocument doc) {
+        return update(ownerId, ownerId, id, doc);
+    }
+
+    /** @param editorId who made the version: the owner or a user with an edit link */
+    @Transactional
+    public SaveResult update(UUID ownerId, UUID editorId, UUID id, ParsedDocument doc) {
         var current = jdbc.sql("select current_version, content_hash from documents"
                         + " where id = :id and owner_id = :owner and deleted_at is null for update")
                 .param("id", id).param("owner", ownerId)
@@ -130,7 +149,7 @@ public class DocumentService {
         } catch (DuplicateKeyException e) {
             throw new DuplicateContentException();
         }
-        insertVersion(id, version, ownerId, doc);
+        insertVersion(id, version, editorId, doc);
         replaceTags(ownerId, id, doc.tags());
         enqueueIndexing(id);
         return new SaveResult(id, Outcome.UPDATED);
@@ -281,6 +300,58 @@ public class DocumentService {
                 .query((rs, n) -> meta(rs.getObject("id", UUID.class), rs, n))
                 .list();
         return new Page(items, page, size, total);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ShareLink> links(UUID ownerId, UUID id) {
+        requireOwned(ownerId, id);
+        return jdbc.sql("select token, permission, created_at from share_links where document_id = :id"
+                        + " order by permission desc")
+                .param("id", id)
+                .query((rs, n) -> new ShareLink(rs.getString("token"), Permission.valueOf(rs.getString("permission")),
+                        instant(rs, "created_at")))
+                .list();
+    }
+
+    /** The existing link for this permission, or a new one. */
+    @Transactional
+    public ShareLink createLink(UUID ownerId, UUID id, Permission permission) {
+        requireOwned(ownerId, id);
+        byte[] bytes = new byte[24];
+        RANDOM.nextBytes(bytes);
+        jdbc.sql("insert into share_links (token, document_id, permission) values (:token, :id, :permission)"
+                        + " on conflict (document_id, permission) do nothing")
+                .param("token", Base64.getUrlEncoder().withoutPadding().encodeToString(bytes))
+                .param("id", id).param("permission", permission.name()).update();
+        return links(ownerId, id).stream().filter(l -> l.permission() == permission).findFirst().orElseThrow();
+    }
+
+    /** The old link stops working; a later {@link #createLink} issues a new token. */
+    @Transactional
+    public void revokeLink(UUID ownerId, UUID id, Permission permission) {
+        requireOwned(ownerId, id);
+        jdbc.sql("delete from share_links where document_id = :id and permission = :permission")
+                .param("id", id).param("permission", permission.name()).update();
+    }
+
+    /** {@code empty} for an unknown or revoked token and for a deleted document. */
+    @Transactional(readOnly = true)
+    public Optional<SharedAccess> resolveLink(String token) {
+        return jdbc.sql("select d.owner_id, d.id, l.permission from share_links l"
+                        + " join documents d on d.id = l.document_id where l.token = :token and d.deleted_at is null")
+                .param("token", token)
+                .query((rs, n) -> new SharedAccess(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
+                        Permission.valueOf(rs.getString(3))))
+                .optional();
+    }
+
+    private void requireOwned(UUID ownerId, UUID id) {
+        boolean owned = jdbc.sql("select exists (select 1 from documents where id = :id and owner_id = :owner"
+                        + " and deleted_at is null)")
+                .param("id", id).param("owner", ownerId).query(Boolean.class).single();
+        if (!owned) {
+            throw new NotFoundException(id);
+        }
     }
 
     private void insertVersion(UUID id, int version, UUID userId, ParsedDocument doc) {

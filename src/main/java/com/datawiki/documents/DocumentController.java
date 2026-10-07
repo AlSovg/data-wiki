@@ -6,6 +6,8 @@ import com.datawiki.documents.DocumentService.DocumentMeta;
 import com.datawiki.documents.DocumentService.ListFilter;
 import com.datawiki.documents.DocumentService.NotFoundException;
 import com.datawiki.documents.DocumentService.Page;
+import com.datawiki.documents.DocumentService.Permission;
+import com.datawiki.documents.DocumentService.ShareLink;
 import com.datawiki.documents.DocumentService.StoredDocument;
 import com.datawiki.documents.DocumentService.StoredVersion;
 import com.datawiki.documents.DocumentService.VersionSummary;
@@ -105,7 +107,28 @@ class DocumentController {
         return new VersionView(v.summary(), v.content(), v.extra());
     }
 
+    @GetMapping("/{id}/links")
+    List<ShareLink> links(Principal user, @PathVariable UUID id) {
+        return documents.links(id(user), id);
+    }
+
+    /** Idempotent: returns the existing link for this permission. */
+    @PutMapping("/{id}/links/{permission}")
+    ShareLink createLink(Principal user, @PathVariable UUID id, @PathVariable Permission permission) {
+        return documents.createLink(id(user), id, permission);
+    }
+
+    @DeleteMapping("/{id}/links/{permission}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void revokeLink(Principal user, @PathVariable UUID id, @PathVariable Permission permission) {
+        documents.revokeLink(id(user), id, permission);
+    }
+
     private DocumentView view(StoredDocument doc) {
+        return view(parser, doc);
+    }
+
+    static DocumentView view(MarkdownParser parser, StoredDocument doc) {
         return new DocumentView(doc.meta(), doc.content(), doc.extra(),
                 parser.parse(doc.content(), doc.meta().title()).structure());
     }
